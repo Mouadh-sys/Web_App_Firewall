@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  waf_proxy:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - CONFIG_PATH=/app/configs/example.yaml
+    volumes:
+      - ./configs:/app/configs
+
+  demo_upstream:
+    build: ./demo_upstream
+    ports:
+      - "8080:8080"

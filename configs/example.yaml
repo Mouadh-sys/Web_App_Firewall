@@ -1,0 +1,22 @@
+# Example configuration for the WAF proxy
+
+upstreams:
+  - name: demo_upstream
+    url: http://demo_upstream:8080
+
+rules:
+  - id: "1"
+    description: "Block path traversal attempts"
+    target: "path"
+    pattern: "\\.\\.\/"
+    score: 10
+    action: "BLOCK"
+
+rate_limits:
+  default:
+    requests_per_minute: 60
+
+thresholds:
+  allow: 5
+  challenge: 8
+  block: 10
