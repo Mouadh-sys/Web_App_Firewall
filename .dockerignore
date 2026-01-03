@@ -1,0 +1,38 @@
+# .dockerignore: files to exclude from Docker build
+
+# Git
+.git
+.gitignore
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.egg-info
+.Python
+.venv
+venv/
+env/
+ENV/
+
+# Testing
+.pytest_cache
+.coverage
+htmlcov
+test_results.log
+
+# OS
+.DS_Store
+.env.local
+
+# Misc
+README.md
+docker-compose.yml
+test_main.http
+

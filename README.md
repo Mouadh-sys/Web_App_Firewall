@@ -3,11 +3,28 @@
 This project implements a Web Application Firewall (WAF) reverse proxy using FastAPI. It is designed to inspect and filter incoming requests before forwarding them to upstream services.
 
 ## Features
-- **Routing/Proxy Layer**: Forwards requests to upstream services with support for host/path-based routing.
-- **Security Engine**: Detects malicious patterns and applies anomaly scoring.
-- **Decision Layer**: Allows, blocks, or marks requests as suspicious based on security rules.
-- **Observability**: Structured JSON logging and simple metrics.
-- **Configuration**: YAML-based configuration with environment variable overrides.
+- **Routing/Proxy Layer**: Forwards requests to upstream services with support for host/path-based routing
+- **Security Engine**: Detects malicious patterns and applies anomaly scoring with configurable thresholds
+- **Rate Limiting**: Token bucket-based per-IP rate limiting (requests per minute, async-safe)
+- **Trusted Proxy Support**: Safe X-Forwarded-For extraction (CIDR-based trust list)
+- **Streaming Responses**: Avoids buffering upstream responses; supports streaming to clients
+- **Proper Header Handling**: Strips hop-by-hop headers, adds X-Forwarded-* headers correctly
+- **Observability**: JSON structured logging + Prometheus metrics (/metrics endpoint)
+- **Configuration**: YAML-based with environment variable overrides (CONFIG_PATH)
+- **Docker**: Production-ready Dockerfile with health checks and non-root user
+
+## Security Highlights
+
+### Client IP Extraction (Trusted Proxies)
+- Respects `trusted_proxies` CIDR list in config
+- Only uses X-Forwarded-For if peer IP is in trusted list (prevents spoofing)
+- Falls back to peer IP if untrusted
+
+### Rate Limiting
+- Token bucket algorithm per client IP
+- Configurable requests_per_minute (default 60)
+- Returns HTTP 429 when limit exceeded
+- In-memory storage (Redis recommended for multi-instance)
 
 ## Quickstart
 
@@ -37,18 +54,59 @@ This project implements a Web Application Firewall (WAF) reverse proxy using Fas
    docker-compose up
    ```
 
-### New WAF behavior
-- The WAF now normalizes request path/query/selected headers and applies rules to multiple targets (path, query, headers).
-- IP allowlist and blocklist are supported in `configs/example.yaml`.
-- Decision logic:
-  - score >= 10 => BLOCK (HTTP 403)
-  - score 6..9 => ALLOW but marked SUSPICIOUS (request still forwarded)
-  - score <= 5 => ALLOW
-- Response headers added to all responses (including BLOCK):
-  - `X-WAF-Decision`: ALLOW | SUSPICIOUS | BLOCK
-  - `X-WAF-Score`: total numeric score
+### Configuration (configs/example.yaml)
 
-### Example requests (using curl)
+Key configuration sections:
+
+```yaml
+upstreams:
+  - name: demo_upstream
+    url: http://demo_upstream:8080
+    weight: 1
+    # Optional: restrict to hosts or path prefixes
+    # hosts: [example.com, www.example.com]
+    # path_prefixes: [/api/, /admin/]
+
+# IP-based fast-path decisions
+ip_allowlist: [127.0.0.1, ::1]
+ip_blocklist: []
+
+# Trusted proxies for X-Forwarded-For (CIDR ranges)
+trusted_proxies:
+  - 127.0.0.1
+  - ::1
+  - 10.0.0.0/8
+  - 172.16.0.0/12
+  - 192.168.0.0/16
+
+# WAF thresholds
+thresholds:
+  allow: 5           # Score <= 5: allow
+  challenge: 6       # Score 6-9: allow but mark suspicious
+  block: 10          # Score >= 10: block (HTTP 403)
+
+# Rate limiting
+rate_limits:
+  requests_per_minute: 60  # Default per IP
+
+# Proxy client settings
+proxy_settings:
+  timeout_seconds: 30.0
+  max_connections: 100
+  max_keepalive_connections: 20
+
+# WAF engine settings
+waf_settings:
+  mode: "block"      # "block" or "monitor" (monitor = never block, only log)
+  max_inspect_bytes: 10000
+  inspect_body: false
+```
+
+### Environment Variables
+
+- `CONFIG_PATH`: Path to YAML config (default: `configs/example.yaml`)
+
+### Example Requests
 
 1) Allowed request (forwards to demo upstream):
 

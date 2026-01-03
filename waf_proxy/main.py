@@ -1,42 +1,89 @@
-from fastapi import FastAPI, Request
-from starlette.responses import JSONResponse
-from waf_proxy.middleware.waf_middleware import WAFMiddleware
+"""WAF Proxy FastAPI application."""
+import logging
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+from starlette.responses import Response
 from waf_proxy.config import load_config
+from waf_proxy.middleware.waf_middleware import WAFMiddleware
 from waf_proxy.observability.logging import setup_logging
-from waf_proxy.observability.metrics import record_request
+from waf_proxy.observability.metrics import get_metrics_text
+from waf_proxy.proxy.proxy_client import ProxyClient
 
-app = FastAPI()
+# Setup logging
+setup_logging()
+logger = logging.getLogger(__name__)
 
 # Load configuration
-config = load_config("configs/example.yaml")
+config = load_config()
+
+# Lifecycle management
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Manage application lifecycle.
+
+    Startup: Initialize
+    Shutdown: Cleanup resources
+    """
+    logger.info("WAF Proxy starting up")
+    yield
+    logger.info("WAF Proxy shutting down")
+    await ProxyClient.close_shared_client()
+
+
+# Create FastAPI app
+app = FastAPI(title="WAF Proxy", version="1.0.0", lifespan=lifespan)
 
 # Add WAF middleware
 app.add_middleware(WAFMiddleware, config=config)
 
-# Setup logging
-setup_logging()
 
-@app.get("/metrics")
-async def metrics():
-    return JSONResponse(content={"metrics": "not implemented"})
-    # Placeholder for Prometheus metrics
+# Health check endpoints (fast, bypass WAF via internal paths)
+@app.get("/healthz")
+async def health_check():
+    """Health check endpoint."""
+    return {"status": "healthy"}
+
 
 @app.get("/readyz")
 async def readiness_check():
-    return {"status": "healthy"}
+    """Readiness probe."""
+    return {"status": "ready"}
 
-@app.get("/healthz")
-async def health_check():
-    return {"status": "healthy"}
 
-@app.middleware("http")
-async def waf_middleware(request: Request, call_next):
-    response = await call_next(request)
-    # Placeholder for WAF logic
-    return response
+# Metrics endpoint (Prometheus plaintext format)
+@app.get("/metrics")
+async def metrics():
+    """
+    Prometheus metrics endpoint.
 
-@app.middleware("http")
-async def observability_middleware(request: Request, call_next):
-    response = await call_next(request)
-    record_request(verdict="ALLOW", status=response.status_code)  # Example usage
-    return response
+    Returns:
+        Prometheus plaintext format metrics
+    """
+    metrics_data = get_metrics_text()
+    return Response(content=metrics_data, media_type="text/plain; version=0.0.4")
+
+
+# Root endpoint
+@app.get("/")
+async def root():
+    """Root endpoint."""
+    return {
+        "name": "WAF Proxy",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "metrics": "/metrics",
+        "health": "/healthz",
+        "ready": "/readyz"
+    }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8000,
+        log_config=None  # Use our JSON logging
+    )
+

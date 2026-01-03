@@ -3,12 +3,33 @@
 upstreams:
   - name: demo_upstream
     url: http://demo_upstream:8080
+    # Optional: restrict to specific hosts
+    # hosts:
+    #   - example.com
+    #   - www.example.com
+    # Optional: restrict to specific path prefixes
+    # path_prefixes:
+    #   - /api/
+    #   - /admin/
+    weight: 1
 
+# IP lists for fast-path decisions
 ip_allowlist:
   - "127.0.0.1"
+  - "::1"
 
 ip_blocklist: []
 
+# Trusted proxy CIDRs (for safe X-Forwarded-For handling)
+# Only IPs in this list can set X-Forwarded-For
+trusted_proxies:
+  - "127.0.0.1"
+  - "::1"
+  - "10.0.0.0/8"
+  - "172.16.0.0/12"
+  - "192.168.0.0/16"
+
+# WAF Rules
 rules:
   - id: "PT001"
     description: "Path traversal indicators"
@@ -20,7 +41,7 @@ rules:
   - id: "SQLI001"
     description: "SQL injection indicators"
     target: "query"
-    pattern: '(?i)(union\\s+select|or\\s+1=1|sleep\(|benchmark\(|--|;--|/\\*|\\*/)'
+    pattern: '(?i)(union\s+select|or\s+1=1|sleep\(|benchmark\(|--|;--|/\*|\*/)'
     score: 8
     enabled: true
 
@@ -34,7 +55,7 @@ rules:
   - id: "SSRF001"
     description: "SSRF indicators (localhost/meta)"
     target: "query"
-    pattern: '(?i)(https?:\\/\\/(localhost|127\\.|0\\.0\\.0\\.0|169\\.254\\.169\\.254)|file:\\/\\/)'
+    pattern: '(?i)(https?:///(localhost|127\.|0\.0\.0\.0|169\.254\.169\.254)|file://)'
     score: 8
     enabled: true
 
@@ -45,9 +66,35 @@ rules:
     score: 6
     enabled: true
 
+# WAF Score Thresholds
+thresholds:
+  allow: 5        # score < 6: ALLOW
+  challenge: 6    # 6 <= score < 10: SUSPICIOUS
+  block: 10       # score >= 10: BLOCK
+
+# WAF Behavior
+waf_settings:
+  mode: "block"           # "block" or "monitor" (monitor never blocks, just logs)
+  max_inspect_bytes: 10000  # Truncate inspections to avoid regex DoS
+  max_body_bytes: 1000000   # Maximum body size for inspection
+  inspect_body: false       # Inspect request body (if true, needs max_body_bytes)
+
+# Rate Limiting
 rate_limits:
-  default:
-    requests_per_minute: 60
+  requests_per_minute: 60
+  # Optional: per-path overrides
+  # per_path:
+  #   /api/search: 10
+  #   /api/login: 5
+
+# Proxy Settings
+proxy_settings:
+  timeout_seconds: 30.0           # Upstream request timeout
+  max_connections: 100             # HTTP connection pool size
+  max_keepalive_connections: 20   # Keep-alive pool
+  keepalive_expiry: 5.0           # Keep-alive duration (seconds)
+  retries: 0                       # Upstream retries (conservative)
+
 
 thresholds:
   allow: 5

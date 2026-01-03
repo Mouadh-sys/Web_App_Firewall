@@ -7,10 +7,9 @@ prometheus-client
 starlette
 pydantic
 
-# Development dependencies (can be removed for production image)
+# Development dependencies (to be removed for production)
 pytest
 pytest-asyncio
 pytest-httpx
 respx
-
 
