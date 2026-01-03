@@ -4,4 +4,4 @@ httpx
 pyyaml
 pytest
 prometheus-client
-
+starlette

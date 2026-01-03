@@ -4,13 +4,46 @@ upstreams:
   - name: demo_upstream
     url: http://demo_upstream:8080
 
+ip_allowlist:
+  - "127.0.0.1"
+
+ip_blocklist: []
+
 rules:
-  - id: "1"
-    description: "Block path traversal attempts"
+  - id: "PT001"
+    description: "Path traversal indicators"
     target: "path"
-    pattern: "\\.\\.\/"
+    pattern: '(?i)(\.\./|%2e%2e%2f|%2e%2e\\)'
     score: 10
-    action: "BLOCK"
+    enabled: true
+
+  - id: "SQLI001"
+    description: "SQL injection indicators"
+    target: "query"
+    pattern: '(?i)(union\\s+select|or\\s+1=1|sleep\(|benchmark\(|--|;--|/\\*|\\*/)'
+    score: 8
+    enabled: true
+
+  - id: "XSS001"
+    description: "XSS indicators"
+    target: "query"
+    pattern: '(?i)(<script|onerror=|onload=|javascript:|<img)'
+    score: 8
+    enabled: true
+
+  - id: "SSRF001"
+    description: "SSRF indicators (localhost/meta)"
+    target: "query"
+    pattern: '(?i)(https?:\\/\\/(localhost|127\\.|0\\.0\\.0\\.0|169\\.254\\.169\\.254)|file:\\/\\/)'
+    score: 8
+    enabled: true
+
+  - id: "UA001"
+    description: "Scanner user-agents"
+    target: "headers"
+    pattern: '(?i)(sqlmap|nikto|nmap|acunetix|masscan|zgrab|dirbuster|gobuster)'
+    score: 6
+    enabled: true
 
 rate_limits:
   default:
