@@ -1,8 +1,8 @@
-# Example configuration for the WAF proxy
+
 
 upstreams:
   - name: demo_upstream
-    url: http://demo_upstream:8080
+    url: http://127.0.0.1:8001
     # Optional: restrict to specific hosts
     # hosts:
     #   - example.com
@@ -33,7 +33,7 @@ trusted_proxies:
 rules:
   - id: "PT001"
     description: "Path traversal indicators"
-    target: "path"
+    target: "path_raw"
     pattern: '(?i)(\.\./|%2e%2e%2f|%2e%2e\\)'
     score: 10
     enabled: true
@@ -95,8 +95,3 @@ proxy_settings:
   keepalive_expiry: 5.0           # Keep-alive duration (seconds)
   retries: 0                       # Upstream retries (conservative)
 
-
-thresholds:
-  allow: 5
-  challenge: 8
-  block: 10

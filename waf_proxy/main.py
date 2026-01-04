@@ -1,4 +1,5 @@
 """WAF Proxy FastAPI application."""
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
@@ -8,6 +9,7 @@ from waf_proxy.middleware.waf_middleware import WAFMiddleware
 from waf_proxy.observability.logging import setup_logging
 from waf_proxy.observability.metrics import get_metrics_text
 from waf_proxy.proxy.proxy_client import ProxyClient
+from waf_proxy.proxy.rate_limiter import RateLimiter
 
 # Setup logging
 setup_logging()
@@ -15,6 +17,20 @@ logger = logging.getLogger(__name__)
 
 # Load configuration
 config = load_config()
+
+cleanup_task: asyncio.Task = None
+
+
+async def cleanup_rate_limiter_periodically(rate_limiter: RateLimiter, interval_seconds: int = 60):
+    """Background task to periodically cleanup expired rate limiter buckets."""
+    try:
+        while True:
+            await asyncio.sleep(interval_seconds)
+            await rate_limiter.cleanup_old_buckets(ttl_seconds=3600.0)
+    except asyncio.CancelledError:
+        logger.info("Rate limiter cleanup task cancelled")
+        raise
+
 
 # Lifecycle management
 @asynccontextmanager
@@ -25,9 +41,28 @@ async def lifespan(app: FastAPI):
     Startup: Initialize
     Shutdown: Cleanup resources
     """
+    global cleanup_task
+    
     logger.info("WAF Proxy starting up")
+    
+    # Schedule cleanup task (middleware has already initialized rate limiter)
+    rate_limiter = getattr(app.state, 'rate_limiter', None)
+    if rate_limiter:
+        cleanup_task = asyncio.create_task(cleanup_rate_limiter_periodically(rate_limiter, 60))
+        logger.info("Rate limiter cleanup task scheduled")
+    
     yield
+    
     logger.info("WAF Proxy shutting down")
+    
+    # Cancel cleanup task
+    if cleanup_task:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
+    
     await ProxyClient.close_shared_client()
 
 

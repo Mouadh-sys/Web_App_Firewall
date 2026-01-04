@@ -1,5 +1,6 @@
 """Request routing to upstream services."""
 import logging
+import random
 from typing import List, Dict, Optional
 from fastapi import Request
 
@@ -86,7 +87,7 @@ class Router:
 
     def _select_by_weight(self):
         """
-        Select upstream using weighted round-robin.
+        Select upstream using weighted random selection.
 
         Returns:
             Upstream config (dict or Pydantic object)
@@ -94,8 +95,20 @@ class Router:
         if not self.upstreams:
             return {}
 
-        # Simple weighted round-robin: cycle through upstreams
-        upstream = self.upstreams[self.current_index]
-        self.current_index = (self.current_index + 1) % len(self.upstreams)
-        return upstream
+        # Extract weights (default to 1 if not specified)
+        weights = []
+        valid_upstreams = []
+        for upstream in self.upstreams:
+            weight = self._get_field(upstream, 'weight', 1)
+            if weight and weight > 0:
+                weights.append(weight)
+                valid_upstreams.append(upstream)
+
+        if not valid_upstreams:
+            # All weights are 0 or negative, fallback to first upstream
+            return self.upstreams[0]
+
+        # Weighted random selection
+        selected = random.choices(valid_upstreams, weights=weights, k=1)[0]
+        return selected
 

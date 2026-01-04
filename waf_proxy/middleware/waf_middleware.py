@@ -16,7 +16,7 @@ from waf_proxy.observability.metrics import (
 logger = logging.getLogger(__name__)
 
 # Internal endpoints that bypass WAF
-INTERNAL_PATHS = {'/metrics', '/readyz', '/healthz'}
+INTERNAL_PATHS = {'/metrics', '/readyz', '/healthz', '/docs', '/redoc', '/openapi.json'}
 
 
 def _to_dict(obj):
@@ -77,12 +77,18 @@ class WAFMiddleware:
         default_rpm = rate_limit_cfg.get('requests_per_minute', 60) if rate_limit_cfg else 60
         self.rate_limiter = RateLimiter(default_rpm)
 
+        # Store rate limiter in app.state for cleanup scheduling
+        if hasattr(app, 'state'):
+            app.state.rate_limiter = self.rate_limiter
+
         # WAF settings
         waf_cfg = config.waf_settings if hasattr(config, 'waf_settings') else (config.get('waf_settings') or {})
         if hasattr(waf_cfg, 'dict'):
             waf_cfg = waf_cfg.dict()
 
         self.max_inspect_bytes = waf_cfg.get('max_inspect_bytes', 10000)
+        self.max_body_bytes = waf_cfg.get('max_body_bytes', 1000000)
+        self.inspect_body = waf_cfg.get('inspect_body', False)
         self.trusted_proxies = config.trusted_proxies if hasattr(config, 'trusted_proxies') else config.get('trusted_proxies')
 
     async def __call__(self, scope, receive, send):
@@ -130,8 +136,54 @@ class WAFMiddleware:
                 await response(scope, receive, send)
                 return
 
-            # Build inspection context
-            inspection = build_inspection_dict(request, self.max_inspect_bytes)
+            # Read and validate request body size
+            body_bytes = None
+            if request.method in ('POST', 'PUT', 'PATCH'):
+                # Check Content-Length header first (fast path)
+                content_length_str = request.headers.get('content-length')
+                if content_length_str:
+                    try:
+                        content_length = int(content_length_str)
+                        if content_length > self.max_body_bytes:
+                            logger.warning(
+                                f"[{request_id}] Request body too large: {content_length} > {self.max_body_bytes}"
+                            )
+                            response = JSONResponse(
+                                content={'error': 'payload_too_large', 'message': 'Request body exceeds maximum size'},
+                                status_code=413
+                            )
+                            response.headers['X-Request-ID'] = request_id
+                            await response(scope, receive, send)
+                            return
+                    except ValueError:
+                        # Invalid Content-Length, continue to read body
+                        pass
+
+                # Read body with size limit (using stream to check size incrementally)
+                try:
+                    body_bytes = b''
+                    async for chunk in request.stream():
+                        body_bytes += chunk
+                        if len(body_bytes) > self.max_body_bytes:
+                            logger.warning(
+                                f"[{request_id}] Request body exceeds limit: {len(body_bytes)} > {self.max_body_bytes}"
+                            )
+                            response = JSONResponse(
+                                content={'error': 'payload_too_large', 'message': 'Request body exceeds maximum size'},
+                                status_code=413
+                            )
+                            response.headers['X-Request-ID'] = request_id
+                            await response(scope, receive, send)
+                            return
+                except Exception as e:
+                    logger.warning(f"[{request_id}] Failed to read request body: {e}")
+                    body_bytes = b''
+
+            # Build inspection context (include body if inspect_body is enabled)
+            inspection = build_inspection_dict(
+                request, self.max_inspect_bytes,
+                body_bytes=body_bytes if self.inspect_body else None
+            )
 
             # Evaluate against WAF rules
             result = self.security_engine.evaluate(inspection, client_ip)
@@ -205,10 +257,10 @@ class WAFMiddleware:
                     await response(scope, receive, send)
                     return
 
-                # Forward request to upstream
+                # Forward request to upstream (pass body_bytes if we read it)
                 upstream_start = time.monotonic()
                 status_code, response_headers, upstream_response = await self.proxy_client.forward_request(
-                    upstream_url, request, client_ip
+                    upstream_url, request, client_ip, body_bytes=body_bytes
                 )
                 upstream_latency = time.monotonic() - upstream_start
 

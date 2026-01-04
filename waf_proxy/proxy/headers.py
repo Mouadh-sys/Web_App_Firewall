@@ -52,10 +52,25 @@ def filter_request_headers(headers: dict) -> dict:
     Returns:
         Filtered headers safe for upstream
     """
+    # Parse Connection header to get additional headers to remove
+    connection_tokens = set()
+    connection_header = headers.get('connection', '')
+    if connection_header:
+        for token in connection_header.split(','):
+            token = token.strip().lower()
+            if token:
+                connection_tokens.add(token)
+
     filtered = {}
     for key, value in headers.items():
-        if should_forward_header(key):
-            filtered[key] = value
+        key_lower = key.lower()
+        # Skip if it's a standard hop-by-hop header
+        if not should_forward_header(key):
+            continue
+        # Skip if it's listed in Connection header
+        if key_lower in connection_tokens:
+            continue
+        filtered[key] = value
     return filtered
 
 
@@ -71,10 +86,25 @@ def filter_response_headers(headers: dict) -> dict:
     Returns:
         Filtered headers safe for client
     """
+    # Parse Connection header to get additional headers to remove
+    connection_tokens = set()
+    connection_header = headers.get('connection', '')
+    if connection_header:
+        for token in connection_header.split(','):
+            token = token.strip().lower()
+            if token:
+                connection_tokens.add(token)
+
     filtered = {}
     for key, value in headers.items():
-        if should_forward_header(key):
-            filtered[key] = value
+        key_lower = key.lower()
+        # Skip if it's a standard hop-by-hop header
+        if not should_forward_header(key):
+            continue
+        # Skip if it's listed in Connection header
+        if key_lower in connection_tokens:
+            continue
+        filtered[key] = value
     return filtered
 
 

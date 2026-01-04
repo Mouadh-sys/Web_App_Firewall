@@ -5,6 +5,7 @@ import time
 from typing import Optional, Tuple
 from fastapi import Request
 from starlette.responses import StreamingResponse
+from starlette.background import BackgroundTask
 from waf_proxy.proxy.headers import filter_request_headers, filter_response_headers, add_forwarding_headers
 
 logger = logging.getLogger(__name__)
@@ -98,7 +99,8 @@ class ProxyClient:
         self,
         upstream_url: str,
         request: Request,
-        client_ip: str
+        client_ip: str,
+        body_bytes: Optional[bytes] = None
     ) -> Tuple[int, dict, httpx.Response]:
         """
         Forward request to upstream and get response.
@@ -132,9 +134,9 @@ class ProxyClient:
             original_host = request.headers.get('host', 'localhost')
             headers = add_forwarding_headers(headers, client_ip, scheme, original_host)
 
-            # Read request body if present
-            body = None
-            if request.method in ('POST', 'PUT', 'PATCH'):
+            # Use provided body bytes if available, otherwise read from request
+            body = body_bytes
+            if body is None and request.method in ('POST', 'PUT', 'PATCH'):
                 try:
                     body = await request.body()
                 except Exception as e:
@@ -193,12 +195,17 @@ class ProxyClient:
             Starlette StreamingResponse
         """
         async def stream_body():
-            async for chunk in upstream_response.aiter_bytes(chunk_size=8192):
-                yield chunk
+            try:
+                async for chunk in upstream_response.aiter_bytes(chunk_size=8192):
+                    yield chunk
+            finally:
+                # Ensure response is closed even if client disconnects
+                await upstream_response.aclose()
 
         return StreamingResponse(
             content=stream_body(),
             status_code=status_code,
-            headers=headers
+            headers=headers,
+            background=BackgroundTask(upstream_response.aclose)
         )
 

@@ -1,7 +1,7 @@
 #!/bin/bash
 # CI/CD Test Script - WAF Production-Grade Implementation
 
-set -e  # Exit on error
+set -euo pipefail  # Exit on error, undefined vars, and pipe failures
 
 echo "========================================"
 echo "WAF PRODUCTION-GRADE TEST SUITE"
@@ -125,7 +125,7 @@ run_test "Pytest can discover tests" "
 "
 
 run_test "Run pytest tests (with timeout)" "
-    timeout 120 python3 -m pytest tests/ -q --tb=short 2>&1 | tail -5
+    timeout 120 python3 -m pytest tests/ -q --tb=short 2>&1
 "
 
 # Phase 6: Docker

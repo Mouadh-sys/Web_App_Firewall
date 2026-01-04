@@ -1,6 +1,5 @@
 """Unit tests for WAF security engine."""
 import pytest
-from conftest import DummyRequest
 from waf_proxy.waf.engine import SecurityEngine
 from waf_proxy.models import Config, UpstreamConfig, RuleConfig, ThresholdsConfig
 

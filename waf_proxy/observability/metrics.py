@@ -18,8 +18,7 @@ rule_hits_counter = Counter(
 # Rate limiting
 rate_limited_total = Counter(
     'rate_limited_requests_total',
-    'Total number of rate-limited requests',
-    ['client_ip']
+    'Total number of rate-limited requests'
 )
 
 # Upstream latency
@@ -49,7 +48,7 @@ def record_rule_hit(rule_id: str) -> None:
 
 def record_rate_limit(client_ip: str) -> None:
     """Record rate limit block."""
-    rate_limited_total.labels(client_ip=client_ip).inc()
+    rate_limited_total.inc()
 
 
 def record_upstream_latency(latency: float) -> None:
