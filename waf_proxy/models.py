@@ -90,15 +90,25 @@ class Config(BaseModel):
                 except ValueError as e:
                     raise ValueError(f'Invalid CIDR range "{cidr}": {e}')
         if self.ip_allowlist:
-            for ip in self.ip_allowlist:
+            for entry in self.ip_allowlist:
                 try:
-                    ipaddress.ip_address(ip)
-                except ValueError as e:
-                    raise ValueError(f'Invalid IP in allowlist "{ip}": {e}')
+                    # Try as IP address first
+                    ipaddress.ip_address(entry)
+                except ValueError:
+                    try:
+                        # If not an IP, try as CIDR network
+                        ipaddress.ip_network(entry, strict=False)
+                    except ValueError as e:
+                        raise ValueError(f'Invalid IP or CIDR in allowlist "{entry}": {e}')
         if self.ip_blocklist:
-            for ip in self.ip_blocklist:
+            for entry in self.ip_blocklist:
                 try:
-                    ipaddress.ip_address(ip)
-                except ValueError as e:
-                    raise ValueError(f'Invalid IP in blocklist "{ip}": {e}')
+                    # Try as IP address first
+                    ipaddress.ip_address(entry)
+                except ValueError:
+                    try:
+                        # If not an IP, try as CIDR network
+                        ipaddress.ip_network(entry, strict=False)
+                    except ValueError as e:
+                        raise ValueError(f'Invalid IP or CIDR in blocklist "{entry}": {e}')
 

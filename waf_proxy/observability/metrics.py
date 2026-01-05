@@ -1,5 +1,5 @@
 """Prometheus metrics for WAF observability."""
-from prometheus_client import Counter, Histogram, generate_latest, REGISTRY
+from prometheus_client import Counter, Histogram, Gauge, generate_latest, REGISTRY
 
 # Request metrics
 requests_total = Counter(
@@ -33,6 +33,28 @@ upstream_errors_total = Counter(
     'upstream_errors_total',
     'Total number of upstream errors',
     ['error_type']
+)
+
+# Config version metrics
+waf_config_version_info = Gauge(
+    'waf_config_version_info',
+    'Current active WAF config version',
+    ['version']
+)
+
+waf_config_reload_success_total = Counter(
+    'waf_config_reload_success_total',
+    'Total number of successful config reloads'
+)
+
+waf_config_reload_failure_total = Counter(
+    'waf_config_reload_failure_total',
+    'Total number of failed config reloads'
+)
+
+waf_config_last_reload_timestamp_seconds = Gauge(
+    'waf_config_last_reload_timestamp_seconds',
+    'Timestamp of last config reload (Unix seconds)'
 )
 
 

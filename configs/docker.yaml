@@ -1,22 +1,18 @@
 
-
 upstreams:
   - name: demo_upstream
     url: http://demo_upstream:8080
-    # Optional: restrict to specific hosts
-    # hosts:
-    #   - example.com
-    #   - www.example.com
-    # Optional: restrict to specific path prefixes
-    # path_prefixes:
-    #   - /api/
-    #   - /admin/
     weight: 1
 
 # IP lists for fast-path decisions
+# Note: /_waf/metrics endpoint is exempt from allowlist for Prometheus scraping
+# These entries are for general WAF allowlist functionality
 ip_allowlist:
   - "127.0.0.1"
   - "::1"
+  # Docker network CIDRs (for reference, though metrics endpoint is exempt)
+  - "172.16.0.0/12"
+  - "10.0.0.0/8"
 
 ip_blocklist: []
 

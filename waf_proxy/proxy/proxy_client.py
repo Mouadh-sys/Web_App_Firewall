@@ -143,7 +143,7 @@ class ProxyClient:
                     logger.warning(f"Failed to read request body: {e}")
                     body = b''
 
-            # Forward request with timeout
+            # Get client for streaming
             client = self.get_shared_client(
                 max_connections=self.max_connections,
                 max_keepalive_connections=self.max_keepalive_connections,
@@ -151,14 +151,16 @@ class ProxyClient:
             )
 
             start_time = time.monotonic()
-            response = await client.request(
+            # Build and send request with stream=True for real streaming
+            httpx_request = client.build_request(
                 method=request.method,
                 url=url,
                 headers=headers,
                 content=body,
-                timeout=self.timeout_seconds,
-                follow_redirects=False
             )
+            # Use send() with stream=True and timeout for real streaming
+            timeout = httpx.Timeout(self.timeout_seconds)
+            response = await client.send(httpx_request, stream=True, timeout=timeout)
             latency = time.monotonic() - start_time
 
             logger.debug(

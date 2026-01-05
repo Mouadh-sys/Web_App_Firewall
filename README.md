@@ -29,30 +29,76 @@ This project implements a Web Application Firewall (WAF) reverse proxy using Fas
 ## Quickstart
 
 ### Prerequisites
-- Python 3.11+
 - Docker and Docker Compose
+- MongoDB Atlas account (for Django control plane)
 
 ### Setup
-1. Clone the repository:
+
+1. **Clone the repository:**
    ```bash
    git clone <repository-url>
    cd Web_Application_Firewall
    ```
 
-2. Install dependencies:
+2. **Create `.env` file from example:**
    ```bash
-   pip install -r requirements.txt
+   cp .env.example .env
    ```
 
-3. Run the application locally:
+3. **Edit `.env` and set your MongoDB Atlas credentials:**
    ```bash
-   uvicorn waf_proxy.main:app --reload
+   MONGODB_URI=mongodb+srv://username:password@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
+   MONGODB_NAME=waf_dashboard
+   DJANGO_SECRET_KEY=your-secret-key-here
+   WAF_API_TOKEN=dev-control-plane-token
    ```
 
-4. Run with Docker Compose (local demo upstream will be available):
+   **Important:** 
+   - Replace `YOUR_PASSWORD` in `MONGODB_URI` with your actual MongoDB Atlas password
+   - Generate a secure `DJANGO_SECRET_KEY` (e.g., using `python -c "import secrets; print(secrets.token_urlsafe(50))"`)
+   - Ensure your MongoDB Atlas IP allowlist includes your Docker host IP (or use `0.0.0.0/0` for development only)
+
+4. **Start the stack:**
    ```bash
-   docker-compose up
+   docker compose up --build
    ```
+
+5. **Create Django superuser (in another terminal):**
+   ```bash
+   docker compose exec django_dashboard python manage.py createsuperuser
+   ```
+
+6. **Access the services:**
+   - WAF Proxy: http://localhost/
+   - Django Dashboard: http://localhost/dashboard/
+   - Django Admin: http://localhost/dashboard/admin/
+   - Grafana: http://localhost/grafana/
+   - Prometheus: http://localhost:9090 (if exposed)
+
+### Verification
+
+1. **Test WAF proxy:**
+   ```bash
+   curl http://localhost/
+   # Should forward to demo upstream
+   ```
+
+2. **Test blocked request:**
+   ```bash
+   curl http://localhost/../etc/passwd
+   # Should return 403
+   ```
+
+3. **Check Prometheus targets:**
+   - Open http://localhost:9090/targets
+   - Verify `waf_proxy` target is UP
+
+4. **Test config polling:**
+   - Log into Django admin at http://localhost/dashboard/admin/
+   - Create/update WAF rules or policy
+   - Click "Publish current config" action on Policy
+   - Check WAF logs - should see config reload within poll interval (default 10s)
+   - Check Prometheus metric: `waf_config_version_info`
 
 ### Configuration (configs/example.yaml)
 
@@ -104,7 +150,18 @@ waf_settings:
 
 ### Environment Variables
 
-- `CONFIG_PATH`: Path to YAML config (default: `configs/example.yaml`)
+**WAF Proxy:**
+- `CONFIG_PATH`: Path to YAML config (default: `configs/docker.yaml`)
+- `CONTROL_PLANE_URL`: Django config endpoint URL (default: `http://django_dashboard:8000/api/waf/config/current`)
+- `CONTROL_PLANE_TOKEN`: Bearer token for control plane authentication
+- `CONTROL_PLANE_POLL_SECONDS`: Polling interval in seconds (default: 10)
+
+**Django Dashboard:**
+- `MONGODB_URI`: MongoDB Atlas connection string
+- `MONGODB_NAME`: Database name (default: `waf_dashboard`)
+- `DJANGO_SECRET_KEY`: Django secret key
+- `DJANGO_ALLOWED_HOSTS`: Comma-separated list of allowed hosts
+- `WAF_API_TOKEN`: Token for WAF to authenticate with Django config endpoint
 
 ### Example Requests
 
@@ -131,7 +188,21 @@ curl -i -H "User-Agent: sqlmap" "http://127.0.0.1:8000/search?q=test"
 ```
 
 ### Configuration
-- Edit `configs/example.yaml` to change rules, allowlist/blocklist and upstreams. Default rules include PT001, SQLI001, XSS001, SSRF001, UA001.
+
+**Initial Config:**
+- Edit `configs/docker.yaml` to change initial rules, allowlist/blocklist and upstreams
+- Default rules include PT001, SQLI001, XSS001, SSRF001, UA001
+
+**Dynamic Config (Control Plane):**
+- Use Django admin at `/dashboard/admin/` to manage:
+  - WAF Rules (create/edit rules with `path_raw` target support)
+  - Upstreams
+  - Policy (thresholds, rate limits, WAF settings)
+  - IP Allowlist/Blocklist
+  - Trusted Proxies
+- Click "Publish current config" action to deploy changes
+- WAF automatically polls and reloads config (no restart needed)
+- Config version is exposed as Prometheus metric `waf_config_version_info`
 
 ### Tests
 Run unit tests with:

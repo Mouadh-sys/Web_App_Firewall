@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8"/>
+    <title>WAF Dashboard</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1"/>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 24px; }
+      .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+      iframe { width: 100%; height: 340px; border: 1px solid #ddd; border-radius: 10px; }
+      .top { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
+      a.button { padding:10px 12px; border:1px solid #ccc; border-radius:10px; text-decoration:none; }
+    </style>
+  </head>
+  <body>
+    <div class="top">
+      <h1>WAF Overview</h1>
+      <div>
+        <a class="button" href="/dashboard/admin/">Control Plane (Admin)</a>
+        <a class="button" href="/grafana/">Full Analytics (Grafana)</a>
+      </div>
+    </div>
+
+    <div class="grid">
+      {% for src in panels %}
+        <iframe src="{{ src }}" loading="lazy"></iframe>
+      {% endfor %}
+    </div>
+  </body>
+</html>

@@ -1,16 +1,65 @@
-version: '3.8'
+version: "3.8"
 
 services:
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - waf_proxy
+      - django_dashboard
+      - grafana
+
   waf_proxy:
     build: .
-    ports:
-      - "8000:8000"
     environment:
-      - CONFIG_PATH=/app/configs/example.yaml
+      - CONFIG_PATH=/app/configs/docker.yaml
+      - CONTROL_PLANE_URL=http://django_dashboard:8000/api/waf/config/current
+      - CONTROL_PLANE_TOKEN=${WAF_API_TOKEN:-dev-control-plane-token}
+      - CONTROL_PLANE_POLL_SECONDS=${CONTROL_PLANE_POLL_SECONDS:-10}
     volumes:
       - ./configs:/app/configs
+    expose:
+      - "8000"
+    depends_on:
+      - demo_upstream
+      - django_dashboard
 
   demo_upstream:
     build: ./demo_upstream
-    ports:
-      - "8080:8080"
+    expose:
+      - "8080"
+
+  django_dashboard:
+    build: ./dashboard
+    environment:
+      - DJANGO_SECRET_KEY=${DJANGO_SECRET_KEY:-dev-secret-key-change-me}
+      - DJANGO_DEBUG=${DJANGO_DEBUG:-1}
+      - DJANGO_ALLOWED_HOSTS=${DJANGO_ALLOWED_HOSTS:-*}
+      - MONGODB_URI=${MONGODB_URI}
+      - MONGODB_NAME=${MONGODB_NAME:-waf_dashboard}
+      - WAF_API_TOKEN=${WAF_API_TOKEN:-dev-control-plane-token}
+      - PROMETHEUS_URL=http://prometheus:9090
+      - GRAFANA_BASE_URL=/grafana
+    expose:
+      - "8000"
+
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    expose:
+      - "9090"
+
+  grafana:
+    image: grafana/grafana:latest
+    volumes:
+      - ./infra/grafana/grafana.ini:/etc/grafana/grafana.ini:ro
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+    expose:
+      - "3000"
+    depends_on:
+      - prometheus
+

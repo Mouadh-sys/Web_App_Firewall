@@ -36,9 +36,9 @@ class SecurityEngine:
 
         self.config = config or {}
 
-        # IP lists
-        self.ip_allowlist = set(self.config.get('ip_allowlist') or [])
-        self.ip_blocklist = set(self.config.get('ip_blocklist') or [])
+        # IP lists - support both IP addresses and CIDR ranges
+        self.ip_allowlist = self._parse_ip_list(self.config.get('ip_allowlist') or [])
+        self.ip_blocklist = self._parse_ip_list(self.config.get('ip_blocklist') or [])
 
         # Thresholds
         thresholds_cfg = self.config.get('thresholds') or {}
@@ -85,6 +85,56 @@ class SecurityEngine:
 
         logger.info(f"Security engine initialized with {len(self.rules)} rules (mode: {self.mode})")
 
+    def _parse_ip_list(self, entries: List[str]) -> List:
+        """
+        Parse IP allowlist/blocklist entries into a list of IP addresses and networks.
+        
+        Args:
+            entries: List of IP addresses or CIDR ranges (strings)
+            
+        Returns:
+            List of ipaddress.IPv4Address, ipaddress.IPv6Address, or ipaddress.IPNetwork objects
+        """
+        import ipaddress
+        result = []
+        for entry in entries:
+            try:
+                # Try as IP address first
+                result.append(ipaddress.ip_address(entry))
+            except ValueError:
+                try:
+                    # If not an IP, try as CIDR network
+                    result.append(ipaddress.ip_network(entry, strict=False))
+                except ValueError:
+                    logger.warning(f"Invalid IP or CIDR in list: {entry}, skipping")
+        return result
+
+    def _ip_in_list(self, client_ip: str, ip_list: List) -> bool:
+        """
+        Check if client IP is in the given list (supports both IP addresses and CIDR ranges).
+        
+        Args:
+            client_ip: Client IP address (string)
+            ip_list: List of ipaddress objects (IPAddress or IPNetwork)
+            
+        Returns:
+            True if client IP matches any entry in the list
+        """
+        import ipaddress
+        try:
+            client_addr = ipaddress.ip_address(client_ip)
+            for entry in ip_list:
+                if isinstance(entry, ipaddress.IPAddress):
+                    if client_addr == entry:
+                        return True
+                elif isinstance(entry, ipaddress.IPNetwork):
+                    if client_addr in entry:
+                        return True
+        except ValueError:
+            # Invalid client IP, can't match
+            pass
+        return False
+
     def evaluate(self, inspection: Dict, client_ip: str) -> Dict:
         """
         Evaluate request and return verdict.
@@ -103,7 +153,7 @@ class SecurityEngine:
         findings = []
 
         # Fast-path: IP allowlist (always allow)
-        if client_ip in self.ip_allowlist:
+        if self._ip_in_list(client_ip, self.ip_allowlist):
             findings.append({
                 'rule_id': 'allowlist',
                 'description': 'IP in allowlist',
@@ -118,7 +168,7 @@ class SecurityEngine:
             }
 
         # Fast-path: IP blocklist (always block, but mode may soften)
-        if client_ip in self.ip_blocklist:
+        if self._ip_in_list(client_ip, self.ip_blocklist):
             findings.append({
                 'rule_id': 'blocklist',
                 'description': 'IP in blocklist',
@@ -178,6 +228,11 @@ class SecurityEngine:
         """
         Decide verdict based on score and thresholds.
 
+        Logic:
+        - ALLOW if score <= allow_threshold
+        - SUSPICIOUS if allow_threshold < score < block_threshold
+        - BLOCK if score >= block_threshold
+
         In monitor mode: never return BLOCK, only ALLOW/SUSPICIOUS.
         In block mode: return ALLOW/SUSPICIOUS/BLOCK based on thresholds.
 
@@ -189,9 +244,11 @@ class SecurityEngine:
         """
         if score >= self.block_threshold:
             verdict = 'BLOCK'
-        elif score >= self.challenge_threshold:
+        elif score > self.allow_threshold:
+            # allow_threshold < score < block_threshold
             verdict = 'SUSPICIOUS'
         else:
+            # score <= allow_threshold
             verdict = 'ALLOW'
 
         # In monitor mode, never block

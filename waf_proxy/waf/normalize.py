@@ -210,7 +210,7 @@ def extract_headers_subset(request) -> str:
     return ' '.join(parts)
 
 
-def build_inspection_dict(request, max_inspect_bytes: int = 10000, body_bytes: Optional[bytes] = None) -> dict:
+def build_inspection_dict(request, max_inspect_bytes: int = 10000, body_bytes: Optional[bytes] = None, scope: Optional[dict] = None) -> dict:
     """
     Build inspection context from request.
 
@@ -218,15 +218,26 @@ def build_inspection_dict(request, max_inspect_bytes: int = 10000, body_bytes: O
         request: FastAPI Request object
         max_inspect_bytes: Maximum bytes to inspect (truncation limit)
         body_bytes: Optional request body bytes (if inspect_body is enabled)
+        scope: Optional ASGI scope dict (for raw_path inspection)
 
     Returns:
         Dictionary with path_raw (decoded, not canonicalized), path (canonicalized),
-        query, headers, and optionally body for rule matching
+        path_asgi_raw (raw bytes from ASGI scope), query, headers, and optionally body for rule matching
     """
     # Decode path without canonicalization (preserves traversal markers)
     path_raw = decode_path(request.url.path)
     # Also provide canonicalized path for backward compatibility
     path = canonicalize_path(path_raw)
+    
+    # Extract raw_path from ASGI scope if available (for maximum fidelity)
+    path_asgi_raw = ''
+    if scope and 'raw_path' in scope:
+        try:
+            # raw_path is bytes in ASGI spec, decode with error handling
+            path_asgi_raw = scope['raw_path'].decode('utf-8', errors='replace')
+        except (AttributeError, UnicodeDecodeError):
+            # If already string or decode fails, use as-is
+            path_asgi_raw = str(scope.get('raw_path', ''))
     
     raw_query = request.url.query
     query = normalize_query(raw_query)
@@ -235,12 +246,14 @@ def build_inspection_dict(request, max_inspect_bytes: int = 10000, body_bytes: O
     # Truncate to avoid regex DoS
     path_raw = path_raw[:max_inspect_bytes]
     path = path[:max_inspect_bytes]
+    path_asgi_raw = path_asgi_raw[:max_inspect_bytes]
     query = query[:max_inspect_bytes]
     headers = headers[:max_inspect_bytes]
 
     result = {
         'path_raw': path_raw,  # Decoded, NOT canonicalized (for traversal detection)
         'path': path,  # Canonicalized (for backward compatibility)
+        'path_asgi_raw': path_asgi_raw,  # Raw path from ASGI scope (for maximum fidelity)
         'query': query,
         'headers': headers,
     }

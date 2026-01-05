@@ -1,11 +1,11 @@
-# Runtime dependencies
+# Runtime dependencies (pinned for stability)
 fastapi
 uvicorn[standard]
 httpx
 pyyaml
 prometheus-client
 starlette
-pydantic
+pydantic>=2.5.0,<3.0.0
 
 # Development dependencies (can be removed for production image)
 pytest
@@ -14,3 +14,5 @@ pytest-httpx
 respx
 
 
+
+django

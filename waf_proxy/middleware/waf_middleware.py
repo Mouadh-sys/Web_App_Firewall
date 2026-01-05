@@ -2,6 +2,7 @@
 import uuid
 import time
 import logging
+import asyncio
 from fastapi import Request
 from starlette.responses import JSONResponse
 from waf_proxy.waf.engine import SecurityEngine
@@ -15,8 +16,9 @@ from waf_proxy.observability.metrics import (
 
 logger = logging.getLogger(__name__)
 
-# Internal endpoints that bypass WAF
-INTERNAL_PATHS = {'/metrics', '/readyz', '/healthz', '/docs', '/redoc', '/openapi.json'}
+# Internal endpoints that bypass WAF (not proxied, handled locally)
+# All internal endpoints are under /_waf/* reserved prefix to avoid conflicts with upstream paths
+INTERNAL_PATHS = {'/', '/_waf/metrics', '/_waf/readyz', '/_waf/healthz', '/docs', '/redoc', '/openapi.json'}
 
 
 def _to_dict(obj):
@@ -48,7 +50,19 @@ class WAFMiddleware:
         """
         self.app = app
         self.config = config
+        self.reload_lock = asyncio.Lock()
+        self.current_config_version = None
 
+        # Initialize components
+        self._initialize_components(config)
+
+        # Store references in app.state for config polling
+        if hasattr(app, 'state'):
+            app.state.waf_middleware = self
+            app.state.rate_limiter = self.rate_limiter
+
+    def _initialize_components(self, config):
+        """Initialize WAF components from config."""
         # WAF engine
         self.security_engine = SecurityEngine(config)
 
@@ -77,10 +91,6 @@ class WAFMiddleware:
         default_rpm = rate_limit_cfg.get('requests_per_minute', 60) if rate_limit_cfg else 60
         self.rate_limiter = RateLimiter(default_rpm)
 
-        # Store rate limiter in app.state for cleanup scheduling
-        if hasattr(app, 'state'):
-            app.state.rate_limiter = self.rate_limiter
-
         # WAF settings
         waf_cfg = config.waf_settings if hasattr(config, 'waf_settings') else (config.get('waf_settings') or {})
         if hasattr(waf_cfg, 'dict'):
@@ -90,6 +100,66 @@ class WAFMiddleware:
         self.max_body_bytes = waf_cfg.get('max_body_bytes', 1000000)
         self.inspect_body = waf_cfg.get('inspect_body', False)
         self.trusted_proxies = config.trusted_proxies if hasattr(config, 'trusted_proxies') else config.get('trusted_proxies')
+
+    async def reload_config(self, new_config, version_hash: str = None):
+        """
+        Atomically reload WAF configuration.
+
+        Args:
+            new_config: New Config object (Pydantic model or dict)
+            version_hash: Optional version hash for metrics
+        """
+        async with self.reload_lock:
+            try:
+                # Validate config by creating new engine (fail fast on invalid regex)
+                test_engine = SecurityEngine(new_config)
+                
+                # Create new components
+                upstreams = new_config.upstreams if hasattr(new_config, 'upstreams') else new_config.get('upstreams', [])
+                new_router = Router(upstreams)
+                
+                rate_limit_cfg = new_config.rate_limits if hasattr(new_config, 'rate_limits') else (new_config.get('rate_limits') or {})
+                if hasattr(rate_limit_cfg, 'dict'):
+                    rate_limit_cfg = rate_limit_cfg.dict()
+                default_rpm = rate_limit_cfg.get('requests_per_minute', 60) if rate_limit_cfg else 60
+                new_rate_limiter = RateLimiter(default_rpm)
+                
+                # Atomically swap references
+                self.config = new_config
+                self.security_engine = test_engine
+                self.router = new_router
+                self.rate_limiter = new_rate_limiter
+                
+                # Update WAF settings
+                waf_cfg = new_config.waf_settings if hasattr(new_config, 'waf_settings') else (new_config.get('waf_settings') or {})
+                if hasattr(waf_cfg, 'dict'):
+                    waf_cfg = waf_cfg.dict()
+                self.max_inspect_bytes = waf_cfg.get('max_inspect_bytes', 10000)
+                self.max_body_bytes = waf_cfg.get('max_body_bytes', 1000000)
+                self.inspect_body = waf_cfg.get('inspect_body', False)
+                self.trusted_proxies = new_config.trusted_proxies if hasattr(new_config, 'trusted_proxies') else new_config.get('trusted_proxies')
+                
+                # Update version tracking
+                if version_hash:
+                    self.current_config_version = version_hash
+                
+                # Update metrics
+                from waf_proxy.observability.metrics import (
+                    waf_config_version_info, waf_config_reload_success_total,
+                    waf_config_last_reload_timestamp_seconds
+                )
+                if version_hash:
+                    waf_config_version_info.labels(version=version_hash).set(1)
+                waf_config_reload_success_total.inc()
+                waf_config_last_reload_timestamp_seconds.set(time.time())
+                
+                logger.info(f"Config reloaded successfully (version: {version_hash or 'unknown'})")
+                
+            except Exception as e:
+                logger.error(f"Config reload failed: {e}", exc_info=True)
+                from waf_proxy.observability.metrics import waf_config_reload_failure_total
+                waf_config_reload_failure_total.inc()
+                raise
 
     async def __call__(self, scope, receive, send):
         """
@@ -180,9 +250,11 @@ class WAFMiddleware:
                     body_bytes = b''
 
             # Build inspection context (include body if inspect_body is enabled)
+            # Pass scope for raw_path inspection
             inspection = build_inspection_dict(
                 request, self.max_inspect_bytes,
-                body_bytes=body_bytes if self.inspect_body else None
+                body_bytes=body_bytes if self.inspect_body else None,
+                scope=scope
             )
 
             # Evaluate against WAF rules

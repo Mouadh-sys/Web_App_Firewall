@@ -1,0 +1,8 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: "waf_proxy"
+    metrics_path: /_waf/metrics
+    static_configs:
+      - targets: ["waf_proxy:8000"]

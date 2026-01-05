@@ -32,35 +32,33 @@ class TestHealthEndpoints:
     """Test health check endpoints (bypass WAF)."""
 
     def test_health_check(self, client):
-        """Test /healthz endpoint."""
-        response = client.get("/healthz")
+        """Test /_waf/healthz endpoint."""
+        response = client.get("/_waf/healthz")
         assert response.status_code == 200
         assert response.json() == {"status": "healthy"}
 
     def test_readiness_check(self, client):
-        """Test /readyz endpoint."""
-        response = client.get("/readyz")
+        """Test /_waf/readyz endpoint."""
+        response = client.get("/_waf/readyz")
         assert response.status_code == 200
         assert response.json() == {"status": "ready"}
 
-    @patch('waf_proxy.proxy.proxy_client.ProxyClient.get_shared_client')
-    def test_root_endpoint(self, mock_get_client, client, mock_upstream):
-        """Test root / endpoint (proxied, mocked upstream)."""
-        # Mock the httpx client
-        mock_client = AsyncMock()
-        mock_client.request = AsyncMock(return_value=mock_upstream)
-        mock_get_client.return_value = mock_client
-
+    def test_root_endpoint(self, client):
+        """Test root / endpoint (local, not proxied)."""
+        # Root endpoint is handled locally, not proxied
         response = client.get("/")
         assert response.status_code == 200
+        assert "name" in response.json()
+        assert response.json()["name"] == "WAF Proxy"
 
 
 class TestMetricsEndpoint:
     """Test Prometheus metrics endpoint."""
 
     def test_metrics_returns_prometheus_text(self, client):
-        """Test /metrics returns Prometheus plaintext format."""
-        response = client.get("/metrics")
+        """Test /_waf/metrics returns Prometheus plaintext format."""
+        # Metrics endpoint is exempt from IP allowlist for Docker network access
+        response = client.get("/_waf/metrics")
         assert response.status_code == 200
         assert "text/plain" in response.headers.get("content-type", "")
 
@@ -69,13 +67,20 @@ class TestMetricsEndpoint:
         assert "# HELP" in content or len(content) > 0  # At least some output
 
     def test_metrics_includes_key_metrics(self, client):
-        """Test /metrics includes expected metric names."""
-        response = client.get("/metrics")
+        """Test /_waf/metrics includes expected metric names."""
+        response = client.get("/_waf/metrics")
         assert response.status_code == 200
         content = response.text
 
         # Check for key metrics
         assert "requests" in content or "metric" in content.lower()
+
+    def test_metrics_always_accessible(self, client):
+        """Test /_waf/metrics is always accessible (exempt from IP allowlist)."""
+        # Metrics endpoint is exempt from allowlist to allow Prometheus scraping
+        # from Docker network, so it should always return 200 regardless of client IP
+        response = client.get("/_waf/metrics")
+        assert response.status_code == 200
 
 
 class TestWAFDecisionHeaders:
@@ -85,11 +90,12 @@ class TestWAFDecisionHeaders:
     def test_blocked_request_has_waf_headers(self, mock_get_client, client, mock_upstream):
         """Test that path traversal is blocked."""
         mock_client = AsyncMock()
-        mock_client.request = AsyncMock(return_value=mock_upstream)
+        mock_client.send = AsyncMock(return_value=mock_upstream)
+        mock_client.build_request = AsyncMock(return_value=None)
         mock_get_client.return_value = mock_client
 
-        # Path traversal should be blocked
-        response = client.get("/../etc/passwd")
+        # Path traversal should be blocked (using percent-encoded form)
+        response = client.get("/%2e%2e/etc/passwd")
         assert response.status_code == 403
         assert "x-waf-decision" in response.headers
         assert response.headers["x-waf-decision"].lower() == "block"
@@ -98,7 +104,8 @@ class TestWAFDecisionHeaders:
     def test_allowed_request_has_waf_headers(self, mock_get_client, client, mock_upstream):
         """Test that safe requests are forwarded."""
         mock_client = AsyncMock()
-        mock_client.request = AsyncMock(return_value=mock_upstream)
+        mock_client.build_request = AsyncMock(return_value=None)
+        mock_client.send = AsyncMock(return_value=mock_upstream)
         mock_get_client.return_value = mock_client
 
         response = client.get("/test")
@@ -113,10 +120,11 @@ class TestRateLimiting:
     def test_request_allowed_under_limit(self, mock_get_client, client, mock_upstream):
         """Test that requests under rate limit are allowed."""
         mock_client = AsyncMock()
-        mock_client.request = AsyncMock(return_value=mock_upstream)
+        mock_client.build_request = AsyncMock(return_value=None)
+        mock_client.send = AsyncMock(return_value=mock_upstream)
         mock_get_client.return_value = mock_client
 
-        response = client.get("/")
+        response = client.get("/test")
         # Should forward to upstream
         assert response.status_code in (200, 502, 429)
 
@@ -128,11 +136,12 @@ class TestTrustedProxyHandling:
     def test_request_with_xff(self, mock_get_client, client, mock_upstream):
         """Test that requests with X-Forwarded-For are handled."""
         mock_client = AsyncMock()
-        mock_client.request = AsyncMock(return_value=mock_upstream)
+        mock_client.build_request = AsyncMock(return_value=None)
+        mock_client.send = AsyncMock(return_value=mock_upstream)
         mock_get_client.return_value = mock_client
 
         response = client.get(
-            "/",
+            "/test",
             headers={"X-Forwarded-For": "1.1.1.1"}
         )
         # Request should complete (even if blocked elsewhere)
