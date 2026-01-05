@@ -1,9 +1,9 @@
-Django
-djongo
+# Django dashboard dependencies (MySQL via mysqlclient)
+Django==3.2.25
+mysqlclient
 django-jazzmin
 gunicorn
 whitenoise
 pydantic
 PyYAML
 requests
-pymongo

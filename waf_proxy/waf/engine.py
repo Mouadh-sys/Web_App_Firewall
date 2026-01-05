@@ -124,10 +124,10 @@ class SecurityEngine:
         try:
             client_addr = ipaddress.ip_address(client_ip)
             for entry in ip_list:
-                if isinstance(entry, ipaddress.IPAddress):
+                if isinstance(entry, ipaddress._BaseAddress):
                     if client_addr == entry:
                         return True
-                elif isinstance(entry, ipaddress.IPNetwork):
+                elif isinstance(entry, ipaddress._BaseNetwork):
                     if client_addr in entry:
                         return True
         except ValueError:

@@ -44,6 +44,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',  # Serve static files in production
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -73,29 +74,28 @@ WSGI_APPLICATION = 'waf_dashboard.wsgi.application'
 
 
 # Database
-# https://docs.djangoproject.com/en/5.2/ref/settings/#databases
+# Switch to MySQL (XAMPP) as the primary database, with sensible defaults.
+# You created a database named "waf_db" in phpMyAdmin.
 
-MONGODB_URI = os.environ.get('MONGODB_URI', '')
-MONGODB_NAME = os.environ.get('MONGODB_NAME', 'waf_dashboard')
+MYSQL_NAME = os.environ.get('MYSQL_DB', 'waf_db')
+MYSQL_USER = os.environ.get('MYSQL_USER', 'root')
+MYSQL_PASSWORD = os.environ.get('MYSQL_PASSWORD', '')
+MYSQL_HOST = os.environ.get('MYSQL_HOST', '127.0.0.1')  # use host.docker.internal from inside Docker
+MYSQL_PORT = os.environ.get('MYSQL_PORT', '3306')
 
-if MONGODB_URI:
-    DATABASES = {
-        'default': {
-            'ENGINE': 'djongo',
-            'NAME': MONGODB_NAME,
-            'CLIENT': {
-                'host': MONGODB_URI,
-            },
-        }
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.mysql',
+        'NAME': MYSQL_NAME,
+        'USER': MYSQL_USER,
+        'PASSWORD': MYSQL_PASSWORD,
+        'HOST': MYSQL_HOST,
+        'PORT': MYSQL_PORT,
+        'OPTIONS': {
+            'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+        },
     }
-else:
-    # Fallback to SQLite for local development
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
-    }
+}
 
 
 # Password validation

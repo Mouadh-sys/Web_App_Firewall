@@ -7,12 +7,11 @@ upstreams:
 # IP lists for fast-path decisions
 # Note: /_waf/metrics endpoint is exempt from allowlist for Prometheus scraping
 # These entries are for general WAF allowlist functionality
+# IMPORTANT: Do NOT add Docker CIDRs here - they would allowlist most container traffic
+# and bypass WAF evaluation. Use trusted_proxies instead for XFF handling.
 ip_allowlist:
   - "127.0.0.1"
   - "::1"
-  # Docker network CIDRs (for reference, though metrics endpoint is exempt)
-  - "172.16.0.0/12"
-  - "10.0.0.0/8"
 
 ip_blocklist: []
 

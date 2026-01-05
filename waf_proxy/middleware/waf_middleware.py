@@ -130,6 +130,10 @@ class WAFMiddleware:
                 self.router = new_router
                 self.rate_limiter = new_rate_limiter
                 
+                # Update app.state.rate_limiter so cleanup task uses new instance
+                if hasattr(self.app, 'state'):
+                    self.app.state.rate_limiter = self.rate_limiter
+                
                 # Update WAF settings
                 waf_cfg = new_config.waf_settings if hasattr(new_config, 'waf_settings') else (new_config.get('waf_settings') or {})
                 if hasattr(waf_cfg, 'dict'):
